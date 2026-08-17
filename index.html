@@ -77,9 +77,7 @@ const T = RU ? {
   fit: "Вписать", actual: "1:1", restart: "Сначала",
   animated: "анимация", still: "статика", open: "открыть файл",
   failTitle: "Картинка не загрузилась",
-  failText: "Не отвечает ни один адрес:",
-  tryMirror: "Показать через зеркало",
-  mirrorFailed: "Зеркало тоже не отдало"
+  failText: "Не отвечает ни один адрес:"
 } : {
   idleTitle: "Nothing selected",
   idleText: "Select a shape with an image fill — its animation plays here.",
@@ -88,9 +86,7 @@ const T = RU ? {
   fit: "Fit", actual: "1:1", restart: "Restart",
   animated: "animated", still: "still", open: "open file",
   failTitle: "Image did not load",
-  failText: "No address responded:",
-  tryMirror: "Load via mirror",
-  mirrorFailed: "Mirror failed too"
+  failText: "No address responded:"
 };
 document.querySelectorAll("[data-t]").forEach(e => e.textContent = T[e.dataset.t]);
 
@@ -140,11 +136,19 @@ function showImage(d) {
   const img = new Image();
   img.alt = d.name || "";
   img.onload = () => { meta.hidden = false; describeFill(d, animated, img.dataset.src || img.src); };
-  img.onerror = () => {
-    if (++n < ORIGINS.length) { img.src = mediaUrl(d.id, n) + "?t=" + stamp; return; }
-    viaFetch(d, img, animated);           // прямая загрузка не прошла — идём в обход
-  };
-  img.src = mediaUrl(d.id, 0) + "?t=" + stamp;
+
+  // Один раз убедились, что прямой путь закрыт, — дальше сразу через зеркало, без лишних кругов
+  if (mirrorMode) {
+    img.onerror = () => failed("зеркало не отдало");
+    img.dataset.src = mediaUrl(d.id, 0);
+    img.src = MIRROR(mediaUrl(d.id, 0)) + "&t=" + stamp;
+  } else {
+    img.onerror = () => {
+      if (++n < ORIGINS.length) { img.src = mediaUrl(d.id, n) + "?t=" + stamp; return; }
+      viaFetch(d, img, animated);         // прямая загрузка не прошла — идём в обход
+    };
+    img.src = mediaUrl(d.id, 0) + "?t=" + stamp;
+  }
 
   stage.innerHTML = "";
   stage.appendChild(img);
@@ -167,7 +171,7 @@ async function viaFetch(d, img, animated) {
   }
   pending = { d, img, animated };
   parent.postMessage({ type: "need-bytes", url: ORIGINS[0] + "/assets/by-file-media-id/" + d.id, mtype: d.mtype }, "*");
-  setTimeout(() => { if (pending && pending.d === d) { pending = null; failed("ответа нет"); } }, 5000);
+  setTimeout(() => { if (pending && pending.d === d) { pending = null; failed("фоновая часть молчит"); } }, 1500);
 }
 
 let pending = null;
@@ -183,31 +187,24 @@ function canDraw() {
   });
 }
 
-// Последний путь: зеркало, которое отдаёт картинку со своими заголовками.
-// Адрес медиа и так открыт без авторизации, но через чужой сервис — только по кнопке.
+// Penpot отдаёт медиа без Cross-Origin-Resource-Policy, и панель плагина —
+// изолированный iframe — такие файлы не принимает. Зеркало забирает файл
+// и отдаёт его с нужными заголовками, сохраняя все кадры (n=-1).
 const MIRROR = url => "https://wsrv.nl/?url=" + encodeURIComponent(url.replace(/^https?:\/\//, "")) + "&n=-1";
+let mirrorMode = false;
 
 async function failed(extra) {
   const d = current;                        // showHint обнуляет current — запоминаем заранее
+
+  // прямые пути закрыты — молча переключаемся на зеркало и повторяем
+  if (!mirrorMode && d) { mirrorMode = true; return showImage(d); }
+
   const bits = [T.failText + " " + ORIGINS.join(", ")];
   if (violation) bits.push("политика: " + violation);
   if (fetchWhy) bits.push("панель: " + fetchWhy);
-  if (extra) bits.push("плагин: " + extra);
+  if (extra) bits.push(extra);
   bits.push("картинки в панели: " + ((await canDraw()) ? "рисуются" : "не рисуются"));
   showHint(T.failTitle, bits.join(" · "));
-
-  if (!d) return;
-  const b = document.createElement("button");
-  b.textContent = T.tryMirror;
-  b.style.cssText = "margin-top:14px;flex:none;padding:8px 14px";
-  b.onclick = () => {
-    const img = new Image();
-    img.onload = () => { current = d; stage.innerHTML = ""; stage.appendChild(img); meta.hidden = false;
-                         describeFill(d, /gif|webp|apng/i.test(d.mtype), img.src); };
-    img.onerror = () => { b.textContent = T.mirrorFailed; b.disabled = true; };
-    img.src = MIRROR(ORIGINS[0] + "/assets/by-file-media-id/" + d.id);
-  };
-  stage.querySelector(".hint").appendChild(b);
 }
 
 function describeFill(d, animated, url) {

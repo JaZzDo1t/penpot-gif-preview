@@ -14,8 +14,20 @@ and its animated fill plays in the panel, at full size and at the right speed.
 - shows the fill's format and pixel size, with a link to the original file;
 - follows the Penpot light/dark theme; UI in English or Russian, by browser locale.
 
-Nothing is uploaded anywhere: the image is fetched from your own Penpot instance
-by its media id, using the session you are already signed in with.
+## How the image gets in
+
+The plugin panel is an isolated iframe, and a browser only accepts a cross-origin
+file there if the server marks it as embeddable. Penpot serves media without
+`Cross-Origin-Resource-Policy` and without CORS headers, so the panel cannot take
+the file directly — not as an image, not with `fetch`, and not from the plugin
+sandbox either (its `fetch` returns a response without byte accessors, and there
+is no `XMLHttpRequest`).
+
+So the panel tries every direct route first, and once it sees they are closed it
+switches to a mirror (`wsrv.nl`) that re-serves the file with the right headers
+and keeps every frame. The media URL is already public — it needs no session —
+but it does mean the file passes through a third party. If Penpot ever adds the
+missing header, the direct route starts working again on its own.
 
 ## Install
 
