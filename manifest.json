@@ -1,0 +1,10 @@
+{
+  "name": "GIF Preview",
+  "description": "Plays animated GIF and WebP image fills that the Penpot canvas shows as a still frame. Select a shape — its animation runs in the panel.",
+  "version": 2,
+  "code": "plugin.js",
+  "icon": "icon.png",
+  "permissions": [
+    "content:read"
+  ]
+}
