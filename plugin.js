@@ -41,6 +41,26 @@ function push() {
   penpot.ui.sendMessage(describe());
 }
 
+// Запасной путь: если панели не дают загрузить картинку напрямую (политика
+// безопасности вокруг её iframe), качаем байты отсюда и отдаём их как data-URL.
+penpot.ui.onMessage(async msg => {
+  if (!msg || msg.type !== "need-bytes") return;
+  try {
+    const r = await fetch(msg.url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const buf = new Uint8Array(await r.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+    penpot.ui.sendMessage({
+      type: "bytes",
+      dataUrl: "data:" + (msg.mtype || "image/gif") + ";base64," + btoa(bin),
+      bytes: buf.length
+    });
+  } catch (e) {
+    penpot.ui.sendMessage({ type: "bytes-failed", message: String(e && e.message) });
+  }
+});
+
 penpot.on("selectionchange", push);
 penpot.on("themechange", theme => penpot.ui.sendMessage({ type: "theme", theme: theme }));
 

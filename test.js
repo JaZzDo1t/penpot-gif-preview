@@ -47,12 +47,26 @@ async (page) => {
   await page.waitForTimeout(400);
   await page.screenshot({ path: 'plugins/penpot-gif-preview/proba.png' });
 
-  // теперь адрес не отвечает — панель обязана сказать об этом, а не показать битую иконку
+  // обход: прямая вставка запрещена, но fetch проходит — картинка обязана появиться через blob
   await page.unroute('**/assets/by-file-media-id/**');
-  await page.route('**/assets/by-file-media-id/**', r => r.fulfill({ status: 404, body: '' }));
+  let asImg = 0;
+  await page.route('**/assets/by-file-media-id/**', route => {
+    const dest = route.request().resourceType();
+    if (dest === 'image') { asImg++; return route.abort(); }      // <img> блокируем
+    return route.fulfill({ path: GIF, contentType: 'image/gif' }); // fetch пропускаем
+  });
+  await send({ type: 'image', id: 'blocked-id', mtype: 'image/gif', w: 150, h: 64, name: 'через обход' });
+  await page.waitForTimeout(1200);
+  out.обход_сработал = await page.locator('.stage img').evaluate(i => i.currentSrc.startsWith('blob:')).catch(() => false);
+  out.прямых_попыток = asImg;
+
+  // ничего не отвечает — панель обязана сказать об этом, а не показать битую иконку
+  await page.unroute('**/assets/by-file-media-id/**');
+  await page.route('**/assets/by-file-media-id/**', r => r.abort());
   await send({ type: 'image', id: 'no-such-id', mtype: 'image/gif', w: 10, h: 10, name: 'битая' });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(6000);
   out.при_ошибке = await page.locator('.hint b').textContent();
+  out.текст_ошибки = (await page.locator('.hint span').textContent()).slice(0, 90);
 
   return out;
 }

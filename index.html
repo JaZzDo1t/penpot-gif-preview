@@ -121,24 +121,54 @@ function showHint(title, text) {
   current = null;
 }
 
+// Что именно запретила политика безопасности — узнаём от браузера, а не гаданием
+let violation = "";
+document.addEventListener("securitypolicyviolation", e => {
+  violation = e.violatedDirective + " ⟵ " + String(e.blockedURI).slice(0, 60);
+});
+
 function showImage(d) {
   current = d;
   const animated = /gif|webp|apng/i.test(d.mtype);
   const stamp = Date.now();               // свежий запрос — гифка стартует с первого кадра
-
-  // адрес инстанса точно не известен: пробуем кандидатов по очереди, пока картинка не отдастся
   let n = 0;
+
   const img = new Image();
   img.alt = d.name || "";
+  img.onload = () => { meta.hidden = false; describeFill(d, animated, img.dataset.src || img.src); };
   img.onerror = () => {
     if (++n < ORIGINS.length) { img.src = mediaUrl(d.id, n) + "?t=" + stamp; return; }
-    showHint(T.failTitle, T.failText + " " + ORIGINS.join(", "));
+    viaFetch(d, img, animated);           // прямая загрузка не прошла — идём в обход
   };
-  img.onload = () => { meta.hidden = false; describeFill(d, animated, mediaUrl(d.id, n)); };
   img.src = mediaUrl(d.id, 0) + "?t=" + stamp;
 
   stage.innerHTML = "";
   stage.appendChild(img);
+}
+
+// Обход 1: тянем байты сами и показываем как blob. Обход 2: просим фоновую часть плагина.
+async function viaFetch(d, img, animated) {
+  img.onerror = () => failed("данные не читаются");   // без этого обход зациклится сам на себя
+  for (const o of ORIGINS) {
+    const url = o + "/assets/by-file-media-id/" + d.id;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const blob = await r.blob();
+      img.dataset.src = url;
+      img.src = URL.createObjectURL(blob);
+      return;
+    } catch (e) { /* следующий адрес */ }
+  }
+  pending = { d, img, animated };
+  parent.postMessage({ type: "need-bytes", url: ORIGINS[0] + "/assets/by-file-media-id/" + d.id, mtype: d.mtype }, "*");
+  setTimeout(() => { if (pending && pending.d === d) { pending = null; failed("ответа нет"); } }, 5000);
+}
+
+let pending = null;
+function failed(extra) {
+  const why = violation ? " · " + violation : (extra ? " · " + extra : "");
+  showHint(T.failTitle, T.failText + " " + ORIGINS.join(", ") + why);
 }
 
 function describeFill(d, animated, url) {
@@ -157,6 +187,13 @@ window.addEventListener("message", e => {
   if (d.type === "noimage") return showHint(T.noImageTitle, d.name ? d.name + " — " + T.noImageText : T.noImageText);
   if (d.type === "error") return showHint("Error", d.message || "");
   if (d.type === "image") return showImage(d);
+  if (d.type === "bytes" && pending) {          // байты пришли от фоновой части
+    const p = pending; pending = null;
+    p.img.dataset.src = ORIGINS[0] + "/assets/by-file-media-id/" + p.d.id;
+    p.img.src = d.dataUrl;
+    return;
+  }
+  if (d.type === "bytes-failed") { pending = null; return failed(d.message); }
 });
 
 const bFit = document.getElementById("bFit");
