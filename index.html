@@ -147,18 +147,19 @@ function showImage(d) {
 }
 
 // Обход 1: тянем байты сами и показываем как blob. Обход 2: просим фоновую часть плагина.
+let fetchWhy = "";
 async function viaFetch(d, img, animated) {
   img.onerror = () => failed("данные не читаются");   // без этого обход зациклится сам на себя
   for (const o of ORIGINS) {
     const url = o + "/assets/by-file-media-id/" + d.id;
     try {
       const r = await fetch(url);
-      if (!r.ok) continue;
+      if (!r.ok) { fetchWhy = "HTTP " + r.status; continue; }
       const blob = await r.blob();
       img.dataset.src = url;
       img.src = URL.createObjectURL(blob);
       return;
-    } catch (e) { /* следующий адрес */ }
+    } catch (e) { fetchWhy = String(e && e.message).slice(0, 70); }
   }
   pending = { d, img, animated };
   parent.postMessage({ type: "need-bytes", url: ORIGINS[0] + "/assets/by-file-media-id/" + d.id, mtype: d.mtype }, "*");
@@ -167,8 +168,11 @@ async function viaFetch(d, img, animated) {
 
 let pending = null;
 function failed(extra) {
-  const why = violation ? " · " + violation : (extra ? " · " + extra : "");
-  showHint(T.failTitle, T.failText + " " + ORIGINS.join(", ") + why);
+  const bits = [T.failText + " " + ORIGINS.join(", ")];
+  if (violation) bits.push("политика: " + violation);
+  if (fetchWhy) bits.push("панель: " + fetchWhy);
+  if (extra) bits.push("плагин: " + extra);
+  showHint(T.failTitle, bits.join(" · "));
 }
 
 function describeFill(d, animated, url) {
