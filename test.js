@@ -43,6 +43,16 @@ async (page) => {
   await page.waitForTimeout(200);
   out.режим_1к1 = await page.locator('.stage').evaluate(e => e.className);
 
+  await page.locator('#bFit').click();
+  await page.waitForTimeout(400);
   await page.screenshot({ path: 'plugins/penpot-gif-preview/proba.png' });
+
+  // теперь адрес не отвечает — панель обязана сказать об этом, а не показать битую иконку
+  await page.unroute('**/assets/by-file-media-id/**');
+  await page.route('**/assets/by-file-media-id/**', r => r.fulfill({ status: 404, body: '' }));
+  await send({ type: 'image', id: 'no-such-id', mtype: 'image/gif', w: 10, h: 10, name: 'битая' });
+  await page.waitForTimeout(800);
+  out.при_ошибке = await page.locator('.hint b').textContent();
+
   return out;
 }

@@ -75,24 +75,36 @@ const T = RU ? {
   noImageTitle: "У фигуры нет картинки",
   noImageText: "Нужна фигура с заливкой-изображением.",
   fit: "Вписать", actual: "1:1", restart: "Сначала",
-  animated: "анимация", still: "статика", open: "открыть файл"
+  animated: "анимация", still: "статика", open: "открыть файл",
+  failTitle: "Картинка не загрузилась",
+  failText: "Не отвечает ни один адрес:"
 } : {
   idleTitle: "Nothing selected",
   idleText: "Select a shape with an image fill — its animation plays here.",
   noImageTitle: "No image in this shape",
   noImageText: "Pick a shape that has an image fill.",
   fit: "Fit", actual: "1:1", restart: "Restart",
-  animated: "animated", still: "still", open: "open file"
+  animated: "animated", still: "still", open: "open file",
+  failTitle: "Image did not load",
+  failText: "No address responded:"
 };
 document.querySelectorAll("[data-t]").forEach(e => e.textContent = T[e.dataset.t]);
 
-// Penpot отдаёт медиа по своему адресу; origin берём у страницы-родителя
-const ORIGIN = (() => {
-  try { if (document.referrer) return new URL(document.referrer).origin; } catch (e) {}
-  try { if (location.ancestorOrigins && location.ancestorOrigins.length) return location.ancestorOrigins[0]; } catch (e) {}
-  return "https://design.penpot.app";
+// Penpot отдаёт медиа по адресу своего инстанса, и без авторизации — достаточно знать origin.
+// Панель сидит во вложенном iframe: ближайший предок — песочница самого плагина,
+// поэтому берём цепочку предков С КОНЦА (верхний = Penpot) и выбрасываем свой origin.
+const ORIGINS = (() => {
+  const list = [];
+  const add = o => { if (o && o !== location.origin && list.indexOf(o) < 0) list.push(o); };
+  try {
+    const a = location.ancestorOrigins;
+    if (a && a.length) for (let i = a.length - 1; i >= 0; i--) add(a[i]);
+  } catch (e) {}
+  try { if (document.referrer) add(new URL(document.referrer).origin); } catch (e) {}
+  add("https://design.penpot.app");
+  return list;
 })();
-const mediaUrl = id => ORIGIN + "/assets/by-file-media-id/" + id;
+const mediaUrl = (id, n) => ORIGINS[n] + "/assets/by-file-media-id/" + id;
 
 const stage = document.getElementById("stage");
 const hint = document.getElementById("hint");
@@ -111,15 +123,25 @@ function showHint(title, text) {
 
 function showImage(d) {
   current = d;
-  const url = mediaUrl(d.id);
+  const animated = /gif|webp|apng/i.test(d.mtype);
+  const stamp = Date.now();               // свежий запрос — гифка стартует с первого кадра
+
+  // адрес инстанса точно не известен: пробуем кандидатов по очереди, пока картинка не отдастся
+  let n = 0;
   const img = new Image();
-  img.src = url + "?t=" + Date.now();     // свежий запрос — гифка стартует с первого кадра
-  img.alt = d.name;
+  img.alt = d.name || "";
+  img.onerror = () => {
+    if (++n < ORIGINS.length) { img.src = mediaUrl(d.id, n) + "?t=" + stamp; return; }
+    showHint(T.failTitle, T.failText + " " + ORIGINS.join(", "));
+  };
+  img.onload = () => { meta.hidden = false; describeFill(d, animated, mediaUrl(d.id, n)); };
+  img.src = mediaUrl(d.id, 0) + "?t=" + stamp;
+
   stage.innerHTML = "";
   stage.appendChild(img);
+}
 
-  const animated = /gif|webp|apng/i.test(d.mtype);
-  meta.hidden = false;
+function describeFill(d, animated, url) {
   mTitle.textContent = d.name || d.fileName || "—";
   mSub.innerHTML = '<span class="badge' + (animated ? '' : ' flat') + '">'
     + (animated ? T.animated : T.still) + '</span>'
